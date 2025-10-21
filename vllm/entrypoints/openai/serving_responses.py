@@ -803,6 +803,9 @@ class OpenAIServingResponses(OpenAIServing):
                 ],
                 status=None,  # NOTE: Only the last output item has status.
             )
+        function_calls, content = self._extract_tool_calls(
+            request, tokenizer, content=content
+        )
         if content:
             output_text = ResponseOutputText(
                 text=content,
@@ -827,7 +830,11 @@ class OpenAIServingResponses(OpenAIServing):
                 type="message",
             )
         outputs = []
-        function_calls = self._extract_tool_calls(request, tokenizer, content=content)
+
+        if reasoning_item:
+            outputs.append(reasoning_item)
+        if message_item:
+            outputs.append(message_item)
         if function_calls:
             outputs.extend(
                 [
@@ -842,11 +849,6 @@ class OpenAIServingResponses(OpenAIServing):
                     for tool_call in function_calls
                 ]
             )
-        else:
-            if reasoning_item:
-                outputs.append(reasoning_item)
-            if message_item:
-                outputs.append(message_item)
         return outputs
 
     def _extract_tool_calls(
@@ -854,14 +856,15 @@ class OpenAIServingResponses(OpenAIServing):
         request: ResponsesRequest,
         tokenizer: AnyTokenizer,
         content: str | None = None,
-    ) -> list[FunctionCall] | None:
+    ) -> tuple[list[FunctionCall], str | None] | None:
         function_calls = list[FunctionCall]()
+
         if not self.enable_auto_tools or not self.tool_parser:
             # Tools are not enabled
-            return None
+            return None, content
         elif request.tool_choice is None:
             # No tool calls.
-            return None
+            return None, content
         elif request.tool_choice and isinstance(
             request.tool_choice, ToolChoiceFunction
         ):
@@ -869,6 +872,7 @@ class OpenAIServingResponses(OpenAIServing):
             function_calls.append(
                 FunctionCall(name=request.tool_choice.name, arguments=content)
             )
+            content = ""  # Clear content since tool is called.
         elif request.tool_choice == "required":
             assert content is not None
             tool_calls = TypeAdapter(list[FunctionDefinition]).validate_json(content)
@@ -881,6 +885,7 @@ class OpenAIServingResponses(OpenAIServing):
                     for tool_call in tool_calls
                 ]
             )
+            content = ""  # Clear content since tool is called.
         elif request.tool_choice == "auto" or request.tool_choice == "none":
             try:
                 tool_parser = self.tool_parser(tokenizer)
@@ -900,12 +905,13 @@ class OpenAIServingResponses(OpenAIServing):
                     )
                     for tool_call in tool_call_info.tool_calls
                 )
+                content = tool_call_info.content
             else:
                 # No tool calls.
-                return None
+                return None, content
         else:
             raise ValueError(f"Invalid tool_choice: {request.tool_choice}")
-        return function_calls
+        return function_calls, content
 
     def _parse_chat_tool_call(
         self, item: ResponseInputOutputItem
