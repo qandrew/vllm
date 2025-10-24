@@ -1105,11 +1105,9 @@ class OpenAIServing:
                     "or Responses API requests."
                 )
                 raise NotImplementedError(msg)
-
-            if isinstance(request, ChatCompletionRequest):
-                request = tool_parser(tokenizer).adjust_request(  # type: ignore
-                    request=request
-                )
+            request = tool_parser(tokenizer).adjust_request(  # type: ignore
+                request=request
+            )
 
         if tokenizer is None:
             assert isinstance(request_prompt, str), (
