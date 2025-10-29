@@ -3,12 +3,15 @@
 """
 Set up this example by starting a vLLM OpenAI-compatible server with tool call
 options enabled.
-Reasoning models can be used through the Responses API as seen here 
+Reasoning models can be used through the Responses API as seen here
 https://platform.openai.com/docs/api-reference/responses
 For example:
-vllm serve Qwen/Qwen3-1.7B --reasoning-parser qwen3 \
+vllm serve MiniMaxAI/MiniMax-M2 \
+    --tensor-parallel-size 4 \
+    --tool-call-parser minimax_m2 \
+    --reasoning-parser minimax_m2_append_think
       --structured-outputs-config.backend xgrammar \
-      --enable-auto-tool-choice --tool-call-parser hermes
+      --enable-auto-tool-choice --port 8000
 """
 
 import json
@@ -26,21 +29,34 @@ def get_weather(latitude: float, longitude: float) -> str:
 
 
 tools = [
+    # {
+    #     "type": "function",
+    #     "name": "get_weather",
+    #     "description": "Get current temperature for provided coordinates in celsius.",
+    #     "parameters": {
+    #         "type": "object",
+    #         "properties": {
+    #             "latitude": {"type": "number"},
+    #             "longitude": {"type": "number"},
+    #         },
+    #         "required": ["latitude", "longitude"],
+    #         "additionalProperties": False,
+    #     },
+    #     "strict": True,
+    # }
     {
         "type": "function",
         "name": "get_weather",
-        "description": "Get current temperature for provided coordinates in celsius.",
+        "description": "Get the current weather in a given location",
         "parameters": {
             "type": "object",
             "properties": {
-                "latitude": {"type": "number"},
-                "longitude": {"type": "number"},
+                "location": {"type": "string", "description": "City and state, e.g., 'San Francisco, CA'"},
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
             },
-            "required": ["latitude", "longitude"],
-            "additionalProperties": False,
-        },
-        "strict": True,
+            "required": ["location", "unit"]
     }
+}
 ]
 
 input_messages = [
@@ -49,12 +65,14 @@ input_messages = [
 
 
 def main():
-    base_url = "http://0.0.0.0:8000/v1"
+    base_url = "http://localhost:8000/v1"
     client = OpenAI(base_url=base_url, api_key="empty")
     model = get_first_model(client)
     response = client.responses.create(
         model=model, input=input_messages, tools=tools, tool_choice="required"
     )
+
+    print(response)
 
     for out in response.output:
         if out.type == "function_call":
