@@ -520,6 +520,7 @@ class OpenAIServingResponses(OpenAIServing):
         prev_response: ResponsesResponse | None,
         tokenizer: AnyTokenizer,
     ):
+        import fbvscode; fbvscode.set_trace()
         if request.tools is None or (
             request.tool_choice == "none" and self.exclude_tools_when_tool_choice_none
         ):
@@ -853,7 +854,7 @@ class OpenAIServingResponses(OpenAIServing):
                 content=[output_text],
                 role="assistant",
                 status="completed",
-                type="message",
+                type="message", #this could be a function call output
             )
         outputs = []
 

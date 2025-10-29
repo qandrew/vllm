@@ -1072,6 +1072,7 @@ class OpenAIServing:
         _chat_template_kwargs.update(chat_template_kwargs or {})
 
         request_prompt: str | list[int]
+        # import fbvscode; fbvscode.set_trace()
 
         if tokenizer is None:
             request_prompt = "placeholder"

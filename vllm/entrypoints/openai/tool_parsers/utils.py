@@ -224,6 +224,6 @@ def get_json_schema_from_tools(
         return tool_map[tool_name].function.parameters
     # tool_choice: "required"
     if tool_choice == "required":
-        return _get_json_schema_from_tools(tools)
+        return _get_json_schema_from_tools(tools) #this break
     # tool_choice: "auto"
     return None
