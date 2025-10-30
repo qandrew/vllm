@@ -28,30 +28,48 @@ from openai import OpenAI
 from utils import get_first_model
 
 
-def get_horoscope(sign):
-    return f"{sign}: Next Tuesday you will befriend a baby otter."
+# def get_horoscope(sign):
+#     return f"{sign}: Next Tuesday you will befriend a baby otter."
 
 
-tools = [
-    {
-        "type": "custom",
-        "name": "get_horoscope",
-        "description": "Get today’s horoscope for an astrological sign.",
+# tools = [
+#     {
+#         "type": "custom",
+#         "name": "get_horoscope",
+#         "description": "Get today’s horoscope for an astrological sign.",
+#         "parameters": {
+#           "type": "object",
+#           "properties": {
+#             "sign": {
+#               "type": "string",
+#               "description": "Astrological sign, e.g. Aries, Taurus, Gemini, etc."
+#             }
+#           },
+#           "required": ["sign"]
+#         }
+#       }
+# ]
+
+def get_weather(location: str, unit: str):
+    return f"THe weather for {location} in {unit} is 20"
+
+tools = [{
+        "type": "function",
+        "name": "get_weather",
+        "description": "Get the current weather in a given location",
         "parameters": {
-          "type": "object",
-          "properties": {
-            "sign": {
-              "type": "string",
-              "description": "Astrological sign, e.g. Aries, Taurus, Gemini, etc."
-            }
-          },
-          "required": ["sign"]
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"},
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+            },
+            "required": ["location", "unit"],
         }
-      }
+    }
 ]
 
 input_messages = [
-    {"role": "user", "content": "What is the horoscope for Leo today?"}
+    {"role": "user", "content": "What is the weather in Paris in Celsius today?"}
 ]
 
 
@@ -72,7 +90,7 @@ def main():
             print("Function call:", out.name, out.arguments)
             tool_call = out
     args = json.loads(tool_call.arguments)
-    result = get_horoscope(args["sign"])
+    result = get_weather(args["location"], args["unit"])
 
     input_messages.append(tool_call)  # append model's function call message
     input_messages.append(
