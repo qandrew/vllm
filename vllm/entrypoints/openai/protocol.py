@@ -341,6 +341,7 @@ class ResponsesRequest(OpenAIBaseModel):
     temperature: float | None = None
     text: ResponseTextConfig | None = None
     tool_choice: ToolChoice = "auto"
+    # this need to stay as tool still?
     tools: list[Tool] = Field(default_factory=list)
     top_logprobs: int | None = 0
     top_p: float | None = None
@@ -552,7 +553,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     stream_options: StreamOptions | None = None
     temperature: float | None = None
     top_p: float | None = None
-    tools: list[ChatCompletionToolsParam] | None = None
+    tools: list[Any] | None = None
     tool_choice: (
         Literal["none"]
         | Literal["auto"]
