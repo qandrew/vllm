@@ -152,6 +152,7 @@ class SimpleContext(ConversationContext):
         self.num_output_tokens += len(output.outputs[0].token_ids or [])
 
     def need_builtin_tool_call(self) -> bool:
+        # TODO: modify this
         return False
 
     async def call_tool(self) -> list[Message]:
