@@ -1218,6 +1218,7 @@ class OpenAIServing:
                 **kwargs,
             )
 
+            # TODO: how to use the tokenizer inside the context?
             async for res in generator:
                 context.append_output(res)
                 # NOTE(woosuk): The stop condition is handled by the engine.
@@ -1236,6 +1237,7 @@ class OpenAIServing:
 
             # Create inputs for the next turn.
             # Render the next prompt token ids.
+            # TODO: simpleContext can't handle this
             prompt_token_ids = context.render_for_completion()
             engine_prompt = EngineTokensPrompt(prompt_token_ids=prompt_token_ids)
             request_prompt = prompt_token_ids
