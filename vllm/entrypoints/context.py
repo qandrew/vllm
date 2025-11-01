@@ -131,9 +131,36 @@ def _create_json_parse_error_messages(
         )
     ]
 
+import re
+def extract_tool_calls(message: str):
+    """
+    Extract and parse JSON from <tool_calls>...</tool_calls> tags in a Minimax M2 message.
+
+    Args:
+        message (str): The full message text containing <tool_calls> tags.
+
+    Returns:
+        dict | None: Parsed JSON content inside <tool_calls> tags, or None if not found or invalid.
+    """
+    match = re.search(r"<tool_calls>\s*(.*?)\s*</tool_calls>", message, re.DOTALL)
+    if not match:
+        return None
+
+    raw_json = match.group(1).strip()
+    try:
+        # Some Minimax messages escape backslashes or use \n literals, so we can be lenient
+        return json.loads(raw_json)
+    except json.JSONDecodeError:
+        # Try to fix common escaping issues
+        fixed = raw_json.replace("\\n", "\n")
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse tool_calls JSON: {e}")
+            return None
 
 class SimpleContext(ConversationContext):
-    def __init__(self):
+    def __init__(self, *, available_tools: list[str] | None):
         self.last_output = None
         self.num_prompt_tokens = 0
         self.num_output_tokens = 0
@@ -143,23 +170,37 @@ class SimpleContext(ConversationContext):
         # not implemented yet for SimpleContext
         self.all_turn_metrics = []
 
-    def append_output(self, output) -> None:
+        self.available_tools = available_tools or []
+        self._tool_sessions: dict[str, ClientSession | Tool] = {}
+        self.called_tools: set[str] = set()
+        self.to_call_tool = None
+
+        self.messages = []
+
+    def append_output(self, output: RequestOutput) -> None:
+        # TODO: need a message parser here, how to use minimax m2?
         self.last_output = output
         if not isinstance(output, RequestOutput):
+            if isinstance(output[0], Message):
+                logger.info(f'we got a tool call {output}')
+                return
             raise ValueError("SimpleContext only supports RequestOutput.")
         self.num_prompt_tokens = len(output.prompt_token_ids or [])
         self.num_cached_tokens = output.num_cached_tokens or 0
         self.num_output_tokens += len(output.outputs[0].token_ids or [])
 
-    def need_builtin_tool_call(self) -> bool:
-        # TODO: modify this
-        return False
+        temp = extract_tool_calls(output.outputs[0].text)
+        if temp:
+            self.to_call_tool = Message(
+                author=Author(role='assistant'),
+                content=[TextContent(text=temp['arguments']['code'])],
+                channel='analysis',
+                recipient='python',
+                content_type='code'
+            )
 
-    async def call_tool(self) -> list[Message]:
-        raise NotImplementedError("Should not be called.")
 
-    def render_for_completion(self) -> list[int]:
-        raise NotImplementedError("Should not be called.")
+
 
     async def init_tool_sessions(
         self,
@@ -167,8 +208,70 @@ class SimpleContext(ConversationContext):
         exit_stack: AsyncExitStack,
         request_id: str,
         mcp_tools: dict[str, Mcp],
-    ) -> None:
-        pass
+    ):
+        if tool_server:
+            for tool_name in self.available_tools:
+                if tool_name not in self._tool_sessions:
+                    tool_type = _map_tool_name_to_tool_type(tool_name)
+                    headers = (
+                        mcp_tools[tool_type].headers if tool_type in mcp_tools else None
+                    )
+                    tool_session = await exit_stack.enter_async_context(
+                        tool_server.new_session(tool_name, request_id, headers)
+                    )
+                    self._tool_sessions[tool_name] = tool_session
+                    exit_stack.push_async_exit(self.cleanup_session)
+
+    async def call_python_tool(
+        self, tool_session: Union["ClientSession", Tool], last_msg: Message
+    ) -> list[Message]:
+        self.called_tools.add("python")
+        if isinstance(tool_session, Tool):
+            return await tool_session.get_result(self)
+        param = {
+            "code": last_msg.content[0].text,
+        }
+        result = await tool_session.call_tool("python", param)
+        result_str = result.content[0].text
+
+        content = TextContent(text=result_str)
+        author = Author(role=Role.TOOL, name="python")
+
+        return [
+            Message(
+                author=author,
+                content=[content],
+                channel=last_msg.channel,
+                recipient=Role.ASSISTANT,
+            )
+        ]
+
+    async def call_tool(self) -> list[Message]:
+        if not self.to_call_tool:
+            return []
+        last_msg = self.to_call_tool
+        recipient = last_msg.recipient
+        if recipient is not None:
+            # if recipient.startswith("browser."):
+            #     return await self.call_search_tool(
+            #         self._tool_sessions["browser"], last_msg
+            #     )
+            if recipient.startswith("python"):
+                return await self.call_python_tool(
+                    self._tool_sessions["python"], last_msg
+                )
+            # elif recipient.startswith("container."):
+            #     return await self.call_container_tool(
+            #         self._tool_sessions["container"], last_msg
+            #     )
+        raise ValueError("No tool call found")
+
+    def need_builtin_tool_call(self) -> bool:
+        # TODO: modify this
+        return self.to_call_tool is not None
+
+    def render_for_completion(self) -> list[int]:
+        raise NotImplementedError("Should not be called.")
 
     async def cleanup_session(self) -> None:
         raise NotImplementedError("Should not be called.")
