@@ -126,11 +126,9 @@ def convert_tool_schema(tool: dict) -> dict:
     into:
         {"type": "function", "function": {...}}
     """
-    if tool.get("type") != "function":
-        raise ValueError("Expected tool['type'] == 'function'")
 
     # Extract everything except 'type' and wrap inside 'function'
-    function_body = {k: v for k, v in tool.items() if k != "type"}
+    function_body = {k: v for k, v in tool.items() if (k != "type" and tool[k] == 'function')}
 
     return {
         "type": "function",

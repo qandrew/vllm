@@ -142,13 +142,14 @@ def extract_tool_calls(message: str):
     Returns:
         dict | None: Parsed JSON content inside <tool_calls> tags, or None if not found or invalid.
     """
-    match = re.search(r"<tool_calls>\s*(.*?)\s*</tool_calls>", message, re.DOTALL)
+    match = re.search(r"<minimax:tool_call>\s*(.*?)\s*</minimax:tool_call>", message, re.DOTALL)
     if not match:
         return None
 
     raw_json = match.group(1).strip()
     try:
         # Some Minimax messages escape backslashes or use \n literals, so we can be lenient
+        # TODO: This might not be json
         return json.loads(raw_json)
     except json.JSONDecodeError:
         # Try to fix common escaping issues
