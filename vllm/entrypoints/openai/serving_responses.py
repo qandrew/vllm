@@ -119,6 +119,7 @@ from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
 
+
 def convert_tool_schema(tool: dict) -> dict:
     """
     Convert a flat tool schema:
@@ -128,7 +129,9 @@ def convert_tool_schema(tool: dict) -> dict:
     """
 
     # Extract everything except 'type' and wrap inside 'function'
-    function_body = {k: v for k, v in tool.items() if (k != "type" and tool[k] == 'function')}
+    function_body = tool
+    if function_body.get("type", "") == "function":
+        del function_body["type"]
 
     return {
         "type": "function",
@@ -311,7 +314,9 @@ class OpenAIServingResponses(OpenAIServing):
         | ErrorResponse
     ):
         error_check_ret = await self._check_model(request)
-        import fbvscode; fbvscode.set_trace()
+        import fbvscode
+
+        fbvscode.set_trace()
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
             return error_check_ret
@@ -542,7 +547,9 @@ class OpenAIServingResponses(OpenAIServing):
         ):
             tool_dicts = None
         else:
-            tool_dicts = [convert_tool_schema(tool.model_dump()) for tool in request.tools]
+            tool_dicts = [
+                convert_tool_schema(tool.model_dump()) for tool in request.tools
+            ]
         # Construct the input messages.
         messages = self._construct_input_messages(request, prev_response)
         _, request_prompts, engine_prompts = await self._preprocess_chat(
@@ -590,7 +597,7 @@ class OpenAIServingResponses(OpenAIServing):
         await context.init_tool_sessions(
             self.tool_server, exit_stack, request.request_id, mcp_tools
         )
-        logger.info('initialized tools')
+        logger.info("initialized tools")
 
     async def responses_full_generator(
         self,
@@ -871,7 +878,7 @@ class OpenAIServingResponses(OpenAIServing):
                 content=[output_text],
                 role="assistant",
                 status="completed",
-                type="message", #this could be a function call output
+                type="message",  # this could be a function call output
             )
         outputs = []
 

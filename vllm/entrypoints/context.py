@@ -131,34 +131,35 @@ def _create_json_parse_error_messages(
         )
     ]
 
+
 import re
+
+
 def extract_tool_calls(message: str):
-    """
-    Extract and parse JSON from <tool_calls>...</tool_calls> tags in a Minimax M2 message.
+    tool_call_match = re.search(
+        r"<minimax:tool_call>(.*?)</minimax:tool_call>", message, re.DOTALL
+    )
 
-    Args:
-        message (str): The full message text containing <tool_calls> tags.
+    if tool_call_match:
+        tool_call_content = tool_call_match.group(1)
 
-    Returns:
-        dict | None: Parsed JSON content inside <tool_calls> tags, or None if not found or invalid.
-    """
-    match = re.search(r"<minimax:tool_call>\s*(.*?)\s*</minimax:tool_call>", message, re.DOTALL)
-    if not match:
+        # Extract the tool name from <invoke name="...">
+        invoke_match = re.search(r"<invoke name=\"(.*?)\">", tool_call_content)
+        tool_name = invoke_match.group(1) if invoke_match else None
+
+        # Extract all <parameter name="...">...</parameter>
+        parameters = {}
+        for param_match in re.finditer(
+            r"<parameter name=\"(.*?)\">(.*?)</parameter>", tool_call_content, re.DOTALL
+        ):
+            param_name, param_value = param_match.groups()
+            parameters[param_name] = param_value.strip()
+
+        result = {"tool_name": tool_name, "parameters": parameters}
+        return result
+    else:
         return None
 
-    raw_json = match.group(1).strip()
-    try:
-        # Some Minimax messages escape backslashes or use \n literals, so we can be lenient
-        # TODO: This might not be json
-        return json.loads(raw_json)
-    except json.JSONDecodeError:
-        # Try to fix common escaping issues
-        fixed = raw_json.replace("\\n", "\n")
-        try:
-            return json.loads(fixed)
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse tool_calls JSON: {e}")
-            return None
 
 class SimpleContext(ConversationContext):
     def __init__(self, *, available_tools: list[str] | None):
@@ -183,7 +184,7 @@ class SimpleContext(ConversationContext):
         self.last_output = output
         if not isinstance(output, RequestOutput):
             if isinstance(output[0], Message):
-                logger.info(f'we got a tool call {output}')
+                logger.info(f"we got a tool call {output}")
                 return
             raise ValueError("SimpleContext only supports RequestOutput.")
         self.num_prompt_tokens = len(output.prompt_token_ids or [])
@@ -193,15 +194,12 @@ class SimpleContext(ConversationContext):
         temp = extract_tool_calls(output.outputs[0].text)
         if temp:
             self.to_call_tool = Message(
-                author=Author(role='assistant'),
-                content=[TextContent(text=temp['arguments']['code'])],
-                channel='analysis',
-                recipient='python',
-                content_type='code'
+                author=Author(role="assistant"),
+                content=[TextContent(text=temp["parameters"]["code"])],
+                channel="analysis",
+                recipient="python",
+                content_type="code",
             )
-
-
-
 
     async def init_tool_sessions(
         self,
