@@ -119,6 +119,24 @@ from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
 
+def convert_tool_schema(tool: dict) -> dict:
+    """
+    Convert a flat tool schema:
+        {"type": "function", "name": "...", "description": "...", "parameters": {...}}
+    into:
+        {"type": "function", "function": {...}}
+    """
+    if tool.get("type") != "function":
+        raise ValueError("Expected tool['type'] == 'function'")
+
+    # Extract everything except 'type' and wrap inside 'function'
+    function_body = {k: v for k, v in tool.items() if k != "type"}
+
+    return {
+        "type": "function",
+        "function": function_body,
+    }
+
 
 def extract_tool_types(tools: list[Tool]) -> set[str]:
     """
@@ -526,7 +544,7 @@ class OpenAIServingResponses(OpenAIServing):
         ):
             tool_dicts = None
         else:
-            tool_dicts = [tool.model_dump() for tool in request.tools]
+            tool_dicts = [convert_tool_schema(tool.model_dump()) for tool in request.tools]
         # Construct the input messages.
         messages = self._construct_input_messages(request, prev_response)
         _, request_prompts, engine_prompts = await self._preprocess_chat(
