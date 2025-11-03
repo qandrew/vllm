@@ -553,7 +553,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     stream_options: StreamOptions | None = None
     temperature: float | None = None
     top_p: float | None = None
-    tools: list[Any] | None = None
+    tools: list[ChatCompletionToolsParam] | None = None
     tool_choice: (
         Literal["none"]
         | Literal["auto"]
