@@ -133,6 +133,114 @@ def _create_json_parse_error_messages(
 
 
 import re
+from dataclasses import dataclass
+from enum import Enum
+
+
+class MinimaxM2MessageType(Enum):
+    """Message types for MiniMax M2 format."""
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    REASONING = "reasoning"
+
+
+@dataclass
+class MinimaxM2Message:
+    """Message class for MiniMax M2 conversations."""
+    role: str  # "user", "assistant", "tool"
+    content: str | None = None
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
+    reasoning: str | None = None
+
+    def to_dict(self) -> dict:
+        """Convert message to dictionary format."""
+        msg_dict = {"role": self.role}
+        if self.content:
+            msg_dict["content"] = self.content
+        if self.tool_calls:
+            msg_dict["tool_calls"] = self.tool_calls
+        if self.tool_call_id:
+            msg_dict["tool_call_id"] = self.tool_call_id
+        if self.reasoning:
+            msg_dict["reasoning"] = self.reasoning
+        return msg_dict
+
+
+class MinimaxM2Parser:
+    """Parser for MiniMax M2 token streams into structured messages."""
+
+    def __init__(self, tokenizer=None):
+        self.tokenizer = tokenizer
+        self.messages: list[MinimaxM2Message] = []
+        self.current_text = ""
+        self.current_role = "assistant"
+
+        # Track parsing state
+        self.in_tool_call = False
+        self.in_reasoning = False
+        self.reasoning_content = ""
+
+    def process(self, token_id: int) -> None:
+        """Process a single token and update parser state."""
+        if self.tokenizer:
+            token_text = self.tokenizer.decode([token_id])
+            self.current_text += token_text
+
+            # Check for special markers
+            if "<think>" in self.current_text and not self.in_reasoning:
+                self.in_reasoning = True
+                self.reasoning_content = ""
+            elif "</think>" in self.current_text and self.in_reasoning:
+                self.in_reasoning = False
+                # Extract reasoning content
+                start_idx = self.current_text.find("<think>") + 7
+                end_idx = self.current_text.find("</think>")
+                if start_idx < end_idx:
+                    self.reasoning_content = self.current_text[start_idx:end_idx]
+
+            if "<minimax:tool_call>" in self.current_text:
+                self.in_tool_call = True
+            elif "</minimax:tool_call>" in self.current_text:
+                self.in_tool_call = False
+                self._finalize_tool_call()
+
+    def _finalize_tool_call(self) -> None:
+        """Finalize and store a complete tool call message."""
+        tool_call_data = extract_tool_calls(self.current_text)
+        if tool_call_data:
+            msg = MinimaxM2Message(
+                role="assistant",
+                tool_calls=[{
+                    "function": {
+                        "name": tool_call_data["tool_name"],
+                        "arguments": json.dumps(tool_call_data["parameters"])
+                    }
+                }]
+            )
+            self.messages.append(msg)
+
+    def finalize(self) -> list[MinimaxM2Message]:
+        """Finalize parsing and return all messages."""
+        # Create final message if there's content
+        if self.current_text and not self.in_tool_call:
+            # Remove tool call markers and reasoning tags
+            clean_text = re.sub(r'<minimax:tool_call>.*?</minimax:tool_call>', '',
+                               self.current_text, flags=re.DOTALL)
+            clean_text = re.sub(r'<think>.*?</think>', '', clean_text, flags=re.DOTALL)
+            clean_text = clean_text.strip()
+
+            if clean_text or self.reasoning_content:
+                msg = MinimaxM2Message(
+                    role=self.current_role,
+                    content=clean_text if clean_text else None,
+                    reasoning=self.reasoning_content if self.reasoning_content else None
+                )
+                self.messages.append(msg)
+
+        return self.messages
 
 
 def extract_tool_calls(message: str):
@@ -575,6 +683,280 @@ class HarmonyContext(ConversationContext):
     async def cleanup_session(self, *args, **kwargs) -> None:
         """Can be used as coro to used in __aexit__"""
 
+        async def cleanup_tool_session(tool_session):
+            if not isinstance(tool_session, Tool):
+                logger.info(
+                    "Cleaning up tool session for %s", tool_session._client_info
+                )
+                with contextlib.suppress(Exception):
+                    await tool_session.call_tool("cleanup_session", {})
+
+        await asyncio.gather(
+            *(
+                cleanup_tool_session(self._tool_sessions[tool])
+                for tool in self.called_tools
+            )
+        )
+
+
+class MinimaxM2Context(ConversationContext):
+    """Context for MiniMax M2 model conversations with tool calling support."""
+
+    def __init__(
+        self,
+        messages: list,
+        available_tools: list[str],
+        tokenizer=None,
+    ):
+        self._messages = messages
+        self.finish_reason: str | None = None
+        self.available_tools = available_tools
+        self._tool_sessions: dict[str, ClientSession | Tool] = {}
+        self.called_tools: set[str] = set()
+
+        # Initialize the parser for MiniMax M2 format
+        self.parser = MinimaxM2Parser(tokenizer=tokenizer)
+        self.tokenizer = tokenizer
+
+        # Token usage tracking
+        self.num_init_messages = len(messages)
+        self.num_prompt_tokens = 0
+        self.num_output_tokens = 0
+        self.num_cached_tokens = 0
+        self.num_reasoning_tokens = 0
+        self.num_tool_output_tokens = 0
+
+        # Turn tracking
+        self.current_turn_metrics = TurnMetrics()
+        self.all_turn_metrics: list[TurnMetrics] = []
+        self.is_first_turn = True
+
+    def append_output(self, output: RequestOutput | list[Message]) -> None:
+        """Append model output to context."""
+        if isinstance(output, RequestOutput):
+            output_token_ids = output.outputs[0].token_ids
+
+            # Process tokens through the parser
+            for token_id in output_token_ids:
+                self.parser.process(token_id)
+
+            # Update token usage
+            self._update_prefill_token_usage(output)
+            self._update_decode_token_usage(output)
+
+            # Append current turn metrics
+            self.all_turn_metrics.append(self.current_turn_metrics.copy())
+            self.current_turn_metrics.reset()
+
+            # Get parsed messages from parser
+            output_msgs = self.parser.finalize()
+
+            # Set finish reason
+            self.finish_reason = output.outputs[0].finish_reason
+
+            # Convert MinimaxM2Messages to the internal message format
+            for msg in output_msgs:
+                self._messages.append(msg.to_dict())
+        else:
+            # Tool output
+            output_msgs = output
+            for msg in output_msgs:
+                self._messages.append(msg)
+
+    def _update_prefill_token_usage(self, output: RequestOutput) -> None:
+        """Update token usage for the prefill phase."""
+        if output.prompt_token_ids is not None:
+            this_turn_input_tokens = len(output.prompt_token_ids)
+        else:
+            this_turn_input_tokens = 0
+            logger.error("RequestOutput appended contains no prompt_token_ids.")
+
+        self.current_turn_metrics.input_tokens = this_turn_input_tokens
+        self.num_prompt_tokens += this_turn_input_tokens
+
+        # Calculate tool tokens (except on first turn)
+        if self.is_first_turn:
+            self.is_first_turn = False
+        else:
+            previous_turn = self.all_turn_metrics[-1]
+            this_turn_tool_tokens = (
+                self.current_turn_metrics.input_tokens
+                - previous_turn.input_tokens
+                - previous_turn.output_tokens
+            )
+
+            if this_turn_tool_tokens < 0:
+                logger.error(
+                    "Negative tool output tokens calculated: %d. Setting to 0.",
+                    this_turn_tool_tokens,
+                )
+                this_turn_tool_tokens = 0
+
+            self.num_tool_output_tokens += this_turn_tool_tokens
+            self.current_turn_metrics.tool_output_tokens = this_turn_tool_tokens
+
+        # Update cached tokens
+        num_cached_token = output.num_cached_tokens
+        if num_cached_token is not None:
+            self.num_cached_tokens += num_cached_token
+            self.current_turn_metrics.cached_input_tokens = num_cached_token
+
+    def _update_decode_token_usage(self, output: RequestOutput) -> int:
+        """Update token usage for the decode phase."""
+        updated_output_token_count = 0
+        if output.outputs:
+            for completion_output in output.outputs:
+                updated_output_token_count += len(completion_output.token_ids)
+            self.num_output_tokens += updated_output_token_count
+            self.current_turn_metrics.output_tokens += updated_output_token_count
+        return updated_output_token_count
+
+    @property
+    def messages(self) -> list:
+        return self._messages
+
+    def need_builtin_tool_call(self) -> bool:
+        """Check if the last message requires a built-in tool call."""
+        if not self._messages:
+            return False
+
+        last_msg = self._messages[-1]
+        if isinstance(last_msg, dict):
+            tool_calls = last_msg.get("tool_calls")
+            if tool_calls:
+                # Check if any tool call is a built-in tool
+                for tool_call in tool_calls:
+                    func_name = tool_call.get("function", {}).get("name", "")
+                    # Check if this is a built-in tool (python, browser, container)
+                    if any(tool in func_name.lower() for tool in ["python", "browser", "container"]):
+                        return True
+        return False
+
+    async def call_tool(self) -> list[Message]:
+        """Call the appropriate tool based on the last message."""
+        if not self._messages:
+            return []
+
+        last_msg = self._messages[-1]
+        if not isinstance(last_msg, dict) or "tool_calls" not in last_msg:
+            return []
+
+        results = []
+        for tool_call in last_msg.get("tool_calls", []):
+            func_name = tool_call.get("function", {}).get("name", "")
+            func_args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+
+            # Determine which tool to call
+            if "python" in func_name.lower():
+                result = await self._call_python_tool(func_name, func_args)
+                results.append(result)
+            elif "browser" in func_name.lower():
+                result = await self._call_browser_tool(func_name, func_args)
+                results.append(result)
+            elif "container" in func_name.lower():
+                result = await self._call_container_tool(func_name, func_args)
+                results.append(result)
+
+        return results
+
+    async def _call_python_tool(self, func_name: str, func_args: dict) -> Message:
+        """Call the python tool."""
+        self.called_tools.add("python")
+        tool_session = self._tool_sessions.get("python")
+
+        if isinstance(tool_session, Tool):
+            return await tool_session.get_result(self)
+
+        code = func_args.get("code", "")
+        param = {"code": code}
+        result = await tool_session.call_tool("python", param)
+        result_str = result.content[0].text
+
+        content = TextContent(text=result_str)
+        author = Author(role=Role.TOOL, name="python")
+
+        return Message(
+            author=author,
+            content=[content],
+            recipient=Role.ASSISTANT,
+        )
+
+    async def _call_browser_tool(self, func_name: str, func_args: dict) -> Message:
+        """Call the browser/search tool."""
+        self.called_tools.add("browser")
+        tool_session = self._tool_sessions.get("browser")
+
+        if isinstance(tool_session, Tool):
+            return await tool_session.get_result(self)
+
+        result = await tool_session.call_tool(func_name, func_args)
+        result_str = result.content[0].text
+
+        content = TextContent(text=result_str)
+        author = Author(role=Role.TOOL, name=func_name)
+
+        return Message(
+            author=author,
+            content=[content],
+            recipient=Role.ASSISTANT,
+        )
+
+    async def _call_container_tool(self, func_name: str, func_args: dict) -> Message:
+        """Call the container tool."""
+        self.called_tools.add("container")
+        tool_session = self._tool_sessions.get("container")
+
+        if isinstance(tool_session, Tool):
+            return await tool_session.get_result(self)
+
+        result = await tool_session.call_tool(func_name, func_args)
+        result_str = result.content[0].text
+
+        content = TextContent(text=result_str)
+        author = Author(role=Role.TOOL, name=func_name)
+
+        return Message(
+            author=author,
+            content=[content],
+            recipient=Role.ASSISTANT,
+        )
+
+    def render_for_completion(self) -> list[int]:
+        """Render messages for completion (requires tokenizer)."""
+        if not self.tokenizer:
+            raise NotImplementedError("render_for_completion requires a tokenizer")
+
+        # Apply chat template to convert messages to tokens
+        prompt = self.tokenizer.apply_chat_template(
+            self._messages,
+            tokenize=True,
+            add_generation_prompt=True
+        )
+        return prompt
+
+    async def init_tool_sessions(
+        self,
+        tool_server: ToolServer | None,
+        exit_stack: AsyncExitStack,
+        request_id: str,
+        mcp_tools: dict[str, Mcp],
+    ):
+        """Initialize tool sessions."""
+        if tool_server:
+            for tool_name in self.available_tools:
+                if tool_name not in self._tool_sessions:
+                    tool_type = _map_tool_name_to_tool_type(tool_name)
+                    headers = (
+                        mcp_tools[tool_type].headers if tool_type in mcp_tools else None
+                    )
+                    tool_session = await exit_stack.enter_async_context(
+                        tool_server.new_session(tool_name, request_id, headers)
+                    )
+                    self._tool_sessions[tool_name] = tool_session
+                    exit_stack.push_async_exit(self.cleanup_session)
+
+    async def cleanup_session(self, *args, **kwargs) -> None:
+        """Clean up tool sessions."""
         async def cleanup_tool_session(tool_session):
             if not isinstance(tool_session, Tool):
                 logger.info(
