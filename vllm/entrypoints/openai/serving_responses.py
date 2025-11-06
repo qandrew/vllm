@@ -77,7 +77,11 @@ from vllm.entrypoints.harmony_utils import (
     render_for_completion,
 )
 from vllm.entrypoints.logger import RequestLogger
-from vllm.entrypoints.openai.parser.sentence import Sentence
+from vllm.entrypoints.openai.parser.sentence import (
+    Role,
+    Sentence,
+    convert_messages_to_sentences,
+)
 from vllm.entrypoints.openai.protocol import (
     DeltaMessage,
     ErrorResponse,
@@ -285,7 +289,9 @@ class OpenAIServingResponses(OpenAIServing):
         | ErrorResponse
     ):
         error_check_ret = await self._check_model(request)
-        import fbvscode; fbvscode.set_trace()
+        import fbvscode
+
+        fbvscode.set_trace()
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
             return error_check_ret
@@ -394,8 +400,11 @@ class OpenAIServingResponses(OpenAIServing):
                     if envs.VLLM_USE_EXPERIMENTAL_PARSER_CONTEXT:
                         # This is an feature in development for parsing tokens during generation
                         # instead of at the end
+                        sentences: list[Sentence] = convert_messages_to_sentences(
+                            messages
+                        )
                         context = ParsableContext(
-                            sentences=messages,
+                            sentences=sentences,
                             tokenizer=tokenizer,
                             reasoning_parser=self.reasoning_parser,
                         )
@@ -808,6 +817,13 @@ class OpenAIServingResponses(OpenAIServing):
 
         for sentence in sentences:
             for text_content in sentence.content:
+                if sentence.author.role != Role.ASSISTANT:
+                    # This could be a system/user message, and
+                    # This is a message from a tool to the assistant (e.g., search result).
+                    # Don't include it in the final output for now. This aligns with
+                    # OpenAI's behavior on models like o4-mini.
+                    continue
+
                 channel = text_content.channel
                 text = text_content.text
 

@@ -20,6 +20,7 @@ from vllm.entrypoints.harmony_utils import (
 from vllm.entrypoints.openai.parser.parser import (
     get_streamable_parser_for_simple_context,
 )
+from vllm.entrypoints.openai.parser.sentence import Sentence
 from vllm.entrypoints.tool import Tool
 from vllm.entrypoints.tool_server import ToolServer
 from vllm.outputs import RequestOutput
@@ -182,7 +183,7 @@ class ParsableContext(ConversationContext):
     def __init__(
         self,
         *,
-        sentences: list,
+        sentences: list[Sentence],
         tokenizer: AnyTokenizer,
         reasoning_parser: ReasoningParser,
     ):
@@ -196,7 +197,9 @@ class ParsableContext(ConversationContext):
         self.all_turn_metrics = []
 
         self.parser = get_streamable_parser_for_simple_context(
-            tokenizer=tokenizer, reasoning_parser=reasoning_parser, sentences=sentences
+            tokenizer=tokenizer,
+            reasoning_parser=reasoning_parser,
+            sentences=sentences,
         )
         self.tokenizer = tokenizer
         self.reasoning_parser = reasoning_parser

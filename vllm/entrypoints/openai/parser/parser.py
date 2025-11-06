@@ -11,8 +11,16 @@ logger = logging.getLogger(__name__)
 class StreamableParser:
     """Incremental parser over completion tokens with reasoning support."""
 
-    def __init__(self, *, tokenizer, reasoning_parser: ReasoningParser):
-        self.sentences: list[Sentence] = []
+    def __init__(
+        self,
+        *,
+        tokenizer,
+        reasoning_parser: ReasoningParser,
+        # TODO: process these sentences
+        sentences: list[Sentence],
+    ):
+        self.sentences: list[Sentence] = sentences
+        self.num_initial_sentences = len(sentences)
         self.tokens: list[int] = []
         self.tokenizer = tokenizer
 
@@ -63,7 +71,7 @@ class StreamableParser:
 
 
 def get_streamable_parser_for_simple_context(
-    *, tokenizer, reasoning_parser: ReasoningParser, sentences
+    *, tokenizer, reasoning_parser: ReasoningParser, sentences: list[Sentence]
 ) -> StreamableParser:
     """Factory function to create a StreamableParser with optional reasoning parser.
 
@@ -74,7 +82,9 @@ def get_streamable_parser_for_simple_context(
     Returns:
         StreamableParser instance configured with the provided parser
     """
-    return StreamableParser(tokenizer=tokenizer, reasoning_parser=reasoning_parser)
+    return StreamableParser(
+        tokenizer=tokenizer, reasoning_parser=reasoning_parser, sentences=sentences
+    )
 
 
 """

@@ -7,6 +7,8 @@ from pydantic import (
     BaseModel,
 )
 
+from vllm.entrypoints.chat_utils import ChatCompletionMessageParam
+
 
 class Channel(str, Enum):
     THINK = "think"
@@ -53,4 +55,38 @@ class Sentence(BaseModel):
     author: Author
     content: list[Content]
 
-# class
+
+def convert_messages_to_sentences(
+    messages: list[ChatCompletionMessageParam],
+) -> list[Sentence]:
+    """
+    Convert a list of messages to a list of sentences.
+    """
+    sentences: list[Sentence] = []
+    for message in messages:
+        if message["role"] == "system":
+            sentences.append(
+                Sentence(
+                    author=Author(role=Role.SYSTEM),
+                    content=[TextContent(text=message["content"])],
+                )
+            )
+        elif message["role"] == "user":
+            sentences.append(
+                Sentence(
+                    author=Author(role=Role.USER),
+                    content=[TextContent(text=message["content"])],
+                )
+            )
+        elif message["role"] == "assistant":
+            # TODO: tool_calls
+            sentences.append(
+                Sentence(
+                    author=Author(role=Role.ASSISTANT),
+                    content=[TextContent(text=message["content"])],
+                )
+            )
+        else:
+            raise ValueError(f"Unknown role: {message.role}")
+
+    return sentences
