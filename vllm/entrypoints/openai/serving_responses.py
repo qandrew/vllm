@@ -119,6 +119,7 @@ from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
 
+
 def convert_tool_schema(tool: dict) -> dict:
     """
     Convert a flat tool schema:
@@ -126,11 +127,11 @@ def convert_tool_schema(tool: dict) -> dict:
     into:
         {"type": "function", "function": {...}}
     """
-    if tool.get("type") != "function":
-        raise ValueError("Expected tool['type'] == 'function'")
 
     # Extract everything except 'type' and wrap inside 'function'
-    function_body = {k: v for k, v in tool.items() if k != "type"}
+    function_body = tool
+    if function_body.get("type", "") == "function":
+        del function_body["type"]
 
     return {
         "type": "function",
@@ -313,6 +314,9 @@ class OpenAIServingResponses(OpenAIServing):
         | ErrorResponse
     ):
         error_check_ret = await self._check_model(request)
+        import fbvscode
+
+        fbvscode.set_trace()
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
             return error_check_ret
@@ -377,7 +381,7 @@ class OpenAIServingResponses(OpenAIServing):
         generators: list[AsyncGenerator[ConversationContext, None]] = []
 
         builtin_tool_list: list[str] = []
-        if self.use_harmony and self.tool_server is not None:
+        if self.tool_server is not None:
             if self.tool_server.has_tool("browser"):
                 builtin_tool_list.append("browser")
             if self.tool_server.has_tool("python"):
@@ -417,7 +421,7 @@ class OpenAIServingResponses(OpenAIServing):
                     else:
                         context = HarmonyContext(messages, available_tools)
                 else:
-                    context = SimpleContext()
+                    context = SimpleContext(available_tools=available_tools)
 
                 if self.reasoning_parser is not None:
                     reasoning_parser = self.reasoning_parser(tokenizer)
@@ -538,13 +542,14 @@ class OpenAIServingResponses(OpenAIServing):
         prev_response: ResponsesResponse | None,
         tokenizer: AnyTokenizer,
     ):
-        import fbvscode; fbvscode.set_trace()
         if request.tools is None or (
             request.tool_choice == "none" and self.exclude_tools_when_tool_choice_none
         ):
             tool_dicts = None
         else:
-            tool_dicts = [convert_tool_schema(tool.model_dump()) for tool in request.tools]
+            tool_dicts = [
+                convert_tool_schema(tool.model_dump()) for tool in request.tools
+            ]
         # Construct the input messages.
         messages = self._construct_input_messages(request, prev_response)
         _, request_prompts, engine_prompts = await self._preprocess_chat(
@@ -592,6 +597,7 @@ class OpenAIServingResponses(OpenAIServing):
         await context.init_tool_sessions(
             self.tool_server, exit_stack, request.request_id, mcp_tools
         )
+        logger.info("initialized tools")
 
     async def responses_full_generator(
         self,
@@ -808,7 +814,7 @@ class OpenAIServingResponses(OpenAIServing):
             except RuntimeError as e:
                 logger.exception("Error in reasoning parser creation.")
                 raise e
-
+            # TODO: this parses
             reasoning_content, content = reasoning_parser.extract_reasoning_content(
                 final_output.text, request=request
             )
@@ -872,7 +878,7 @@ class OpenAIServingResponses(OpenAIServing):
                 content=[output_text],
                 role="assistant",
                 status="completed",
-                type="message", #this could be a function call output
+                type="message",  # this could be a function call output
             )
         outputs = []
 
@@ -881,6 +887,7 @@ class OpenAIServingResponses(OpenAIServing):
         if message_item:
             outputs.append(message_item)
         if function_calls:
+            # TODO: this parses
             tool_call_items = [
                 ResponseFunctionToolCall(
                     id=f"fc_{random_uuid()}",
