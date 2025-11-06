@@ -341,7 +341,6 @@ class ResponsesRequest(OpenAIBaseModel):
     temperature: float | None = None
     text: ResponseTextConfig | None = None
     tool_choice: ToolChoice = "auto"
-    # this need to stay as tool still?
     tools: list[Tool] = Field(default_factory=list)
     top_logprobs: int | None = 0
     top_p: float | None = None
