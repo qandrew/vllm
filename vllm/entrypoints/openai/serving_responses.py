@@ -80,6 +80,7 @@ from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (
     DeltaMessage,
     ErrorResponse,
+    FunctionCall,
     InputTokensDetails,
     OutputTokensDetails,
     RequestResponseMetadata,
@@ -338,7 +339,7 @@ class OpenAIServingResponses(OpenAIServing):
         generators: list[AsyncGenerator[ConversationContext, None]] = []
 
         builtin_tool_list: list[str] = []
-        if self.use_harmony and self.tool_server is not None:
+        if self.tool_server is not None:
             if self.tool_server.has_tool("browser"):
                 builtin_tool_list.append("browser")
             if self.tool_server.has_tool("python"):
@@ -383,9 +384,20 @@ class OpenAIServingResponses(OpenAIServing):
                         # This is an feature in development for parsing tokens during generation
                         # instead of at the end
                         context = ParsableContext(
-                            sentences=messages,
+                            chat_completion_messages=messages,
                             tokenizer=tokenizer,
                             reasoning_parser=self.reasoning_parser,
+                            request=request,
+                            tool_parser_cls=self.tool_parser,
+                            available_tools=available_tools,
+                            tool_dicts=[
+                                convert_tool_responses_to_completions_format(
+                                    tool.model_dump()
+                                )
+                                for tool in request.tools
+                            ],
+                            chat_template=self.chat_template,
+                            chat_template_content_format=self.chat_template_content_format,
                         )
                     else:
                         context = SimpleContext()
@@ -800,24 +812,55 @@ class OpenAIServingResponses(OpenAIServing):
         output_items: list[ResponseOutputItem] = []
 
         for sentence in chat_completion_messages:
-            for text_content in sentence["content"]:
-                if isinstance(text_content, ResponseReasoningTextContent):
+            # if sentence['role'] == 'tool':
+            # TODO: this should be a McpCall type
+            #     function_call_output = ResponseFunctionToolCallOutputItem(
+            #         id=f"fc_{random_uuid()}",
+            #         call_id=f"call_{random_uuid()}",
+            #         type="function_call_output",
+            #         status="completed",
+            #         output=sentence['content'][0]['text'].text,
+            #     )
+            #     output_items.append(function_call_output)
+            if sentence["role"] != "assistant":
+                # This could be a system/user message, and
+                # This is a message from a tool to the assistant (e.g., search result).
+                # Don't include it in the final output for now. This aligns with
+                # OpenAI's behavior on models like o4-mini.
+                continue
+
+            for content in sentence["content"]:
+                if (
+                    isinstance(content, dict)
+                    and content.get("type") == "reasoning_text"
+                ):
                     # Reasoning content
                     reasoning_item = ResponseReasoningItem(
                         id=f"rs_{random_uuid()}",
                         summary=[],
                         type="reasoning",
-                        content=[text_content],
+                        content=[
+                            ResponseReasoningTextContent(
+                                text=content["text"], type="reasoning_text"
+                            )
+                        ],
                         status="completed",
                     )
                     output_items.append(reasoning_item)
-                elif (
-                    isinstance(text_content, dict)
-                    and text_content.get("type") == "text"
-                ):
+                elif isinstance(content, FunctionCall):
+                    function_call_item = ResponseFunctionToolCall(
+                        id=f"fc_{random_uuid()}",
+                        call_id=f"call_{random_uuid()}",
+                        type="function_call",
+                        status="completed",
+                        name=content.name,
+                        arguments=content.arguments,
+                    )
+                    output_items.append(function_call_item)
+                elif isinstance(content, dict) and content.get("type") == "text":
                     # Final output content
                     output_text = ResponseOutputText(
-                        text=text_content["text"],
+                        text=content["text"],
                         annotations=[],
                         type="output_text",
                         logprobs=None,  # Not available from parser
