@@ -1534,6 +1534,11 @@ def _parse_chat_message_content(
     role = message["role"]
     content = message.get("content")
     reasoning = message.get("reasoning") or message.get("reasoning_content")
+    # TODO: get from reasoning_content?
+
+    # HACK
+    if role == "tool":
+        content_format = "openai"
 
     if content is None:
         content = []
@@ -1543,7 +1548,9 @@ def _parse_chat_message_content(
         role,
         content,  # type: ignore
         mm_tracker,
-        wrap_dicts=(content_format == "openai"),
+        wrap_dicts=(
+            content_format == "openai"
+        ),  # kimik2 thinks this is string, breaks on tool
         interleave_strings=interleave_strings,
     )
 

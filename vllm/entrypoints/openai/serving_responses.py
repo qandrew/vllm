@@ -335,7 +335,7 @@ class OpenAIServingResponses(OpenAIServing):
         generators: list[AsyncGenerator[ConversationContext, None]] = []
 
         builtin_tool_list: list[str] = []
-        if self.use_harmony and self.tool_server is not None:
+        if self.tool_server is not None:
             if self.tool_server.has_tool("browser"):
                 builtin_tool_list.append("browser")
             if self.tool_server.has_tool("python"):
@@ -370,6 +370,7 @@ class OpenAIServingResponses(OpenAIServing):
 
                 context: ConversationContext
                 if self.use_harmony:
+                    # note: in harmomy, the system message is included
                     if request.stream:
                         context = StreamingHarmonyContext(messages, available_tools)
                     else:
@@ -383,12 +384,16 @@ class OpenAIServingResponses(OpenAIServing):
                             tokenizer=tokenizer,
                             reasoning_parser=self.reasoning_parser,
                             request=request,
+                            tool_parser_cls=self.tool_parser,
+                            available_tools=available_tools,
                             tool_dicts=[
                                 convert_tool_responses_to_completions_format(
                                     tool.model_dump()
                                 )
                                 for tool in request.tools
                             ],
+                            chat_template=self.chat_template,
+                            chat_template_content_format=self.chat_template_content_format,
                         )
                     else:
                         context = SimpleContext()
