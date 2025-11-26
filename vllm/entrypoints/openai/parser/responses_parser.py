@@ -72,8 +72,8 @@ class ResponsesParser:
             # extract_tool_calls() returns a list of tool calls.
             function_calls.extend(
                 ResponseFunctionToolCall(
-                    id="fc_lol",
-                    call_id="call_lol",
+                    id=f"fc_{random_uuid()}",
+                    call_id=f"call_{random_uuid()}",
                     type="function_call",
                     status="completed",
                     name=tool_call.function.name,

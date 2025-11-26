@@ -129,6 +129,7 @@ def construct_chat_message_with_tool_call(
             content=item.output,
             tool_call_id=item.call_id,
         )
+    # NOTE: responseOutputMessage get bug isInstance (ResponseOutputMessage)
     elif item.get("type") == "function_call_output":
         # Append the function call output as a tool message.
         return ChatCompletionToolMessageParam(

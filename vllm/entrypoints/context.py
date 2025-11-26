@@ -36,6 +36,7 @@ from vllm.entrypoints.tool_server import ToolServer
 from vllm.outputs import RequestOutput
 from vllm.reasoning.abs_reasoning_parsers import ReasoningParser
 from vllm.transformers_utils.tokenizer import AnyTokenizer
+from vllm.utils import random_uuid
 
 if TYPE_CHECKING:
     from mcp.client import ClientSession
@@ -239,6 +240,7 @@ class ParsableContext(ConversationContext):
         self.tool_dicts = tool_dicts
 
     def append_output(self, output: RequestOutput) -> None:
+        # TODO: output.prompt / output.prompt_token_id doesn't update correctly
         self.num_prompt_tokens = len(output.prompt_token_ids or [])
         self.num_cached_tokens = output.num_cached_tokens or 0
         self.num_output_tokens += len(output.outputs[0].token_ids or [])
@@ -275,9 +277,9 @@ class ParsableContext(ConversationContext):
         result_str = result.content[0].text
 
         message = ResponseFunctionToolCallOutputItem(
-            id="temp",
+            id=f"fco_{random_uuid()}",
             type="function_call_output",
-            call_id="temp",
+            call_id=f"call_{random_uuid()}",
             output=result_str,
             status="completed",
         )
