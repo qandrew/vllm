@@ -17,15 +17,14 @@ from openai_harmony import Author, Message, Role, StreamState, TextContent
 from vllm import envs
 from vllm.entrypoints.chat_utils import (
     ChatTemplateContentFormatOption,
-    CustomChatCompletionMessageParam,
 )
 from vllm.entrypoints.harmony_utils import (
     get_encoding,
     get_streamable_parser_for_assistant,
     render_for_completion,
 )
-from vllm.entrypoints.openai.parser.parser import (
-    get_streamable_parser_for_simple_context,
+from vllm.entrypoints.openai.parser.responses_parser import (
+    get_responses_parser_for_simple_context,
 )
 from vllm.entrypoints.openai.protocol import (
     FunctionCall,
@@ -201,7 +200,7 @@ class ParsableContext(ConversationContext):
     def __init__(
         self,
         *,
-        response_messages: list[CustomChatCompletionMessageParam],
+        response_messages: list[ResponseInputOutputItem],
         tokenizer: AnyTokenizer,
         reasoning_parser: ReasoningParser,
         request: ResponsesRequest,
@@ -219,7 +218,7 @@ class ParsableContext(ConversationContext):
         # not implemented yet for ParsableContext
         self.all_turn_metrics: list[TurnMetrics] = []
 
-        self.parser = get_streamable_parser_for_simple_context(
+        self.parser = get_responses_parser_for_simple_context(
             tokenizer=tokenizer,
             reasoning_parser=reasoning_parser,
             response_messages=response_messages,
@@ -245,9 +244,7 @@ class ParsableContext(ConversationContext):
         self.num_output_tokens += len(output.outputs[0].token_ids or [])
         self.parser.process(output.outputs[0])
 
-    def append_tool_output(
-        self, output: list[CustomChatCompletionMessageParam]
-    ) -> None:
+    def append_tool_output(self, output: list[ResponseInputOutputItem]) -> None:
         self.parser.response_messages.extend(output)
 
     def need_builtin_tool_call(self) -> bool:

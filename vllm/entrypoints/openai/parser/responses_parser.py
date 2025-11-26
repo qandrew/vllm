@@ -18,7 +18,7 @@ from vllm.utils import random_uuid
 logger = logging.getLogger(__name__)
 
 
-class ResponseParser:
+class ResponsesParser:
     """Incremental parser over completion tokens with reasoning support."""
 
     def __init__(
@@ -43,7 +43,7 @@ class ResponseParser:
         self.reasoning_parser_instance = reasoning_parser(tokenizer)
         self.tool_parser_instance = tool_parser_cls(tokenizer)
 
-    def process(self, output: CompletionOutput) -> "ResponseParser":
+    def process(self, output: CompletionOutput) -> "ResponsesParser":
         reasoning_content, content = self.reasoning_parser_instance.extract_reasoning(
             output.text, request=None
         )
@@ -108,15 +108,15 @@ class ResponseParser:
         return self
 
 
-def get_streamable_parser_for_simple_context(
+def get_responses_parser_for_simple_context(
     *,
     tokenizer,
     reasoning_parser: ReasoningParser,
     response_messages: list[ResponseInputOutputItem],
     request: ResponsesRequest,
     tool_parser_cls,
-) -> ResponseParser:
-    """Factory function to create a ResponseParser with
+) -> ResponsesParser:
+    """Factory function to create a ResponsesParser with
     optional reasoning parser.
 
     Args:
@@ -125,25 +125,12 @@ def get_streamable_parser_for_simple_context(
           (e.g., MiniMaxM2ReasoningParser)
 
     Returns:
-        ResponseParser instance configured with the provided parser
+        ResponsesParser instance configured with the provided parser
     """
-    return ResponseParser(
+    return ResponsesParser(
         tokenizer=tokenizer,
         reasoning_parser=reasoning_parser,
         response_messages=response_messages,
         request=request,
         tool_parser_cls=tool_parser_cls,
     )
-
-
-# def render_parser_for_completion():
-
-
-"""
-TODO:
-how to figure out which tokens are special tokens
-
-system
-tool
-ai
-"""

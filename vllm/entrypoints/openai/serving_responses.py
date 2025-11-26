@@ -370,7 +370,6 @@ class OpenAIServingResponses(OpenAIServing):
 
                 context: ConversationContext
                 if self.use_harmony:
-                    # note: in harmomy, the system message is included
                     if request.stream:
                         context = StreamingHarmonyContext(messages, available_tools)
                     else:
