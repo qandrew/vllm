@@ -29,6 +29,7 @@ from vllm.entrypoints.openai.parser.responses_parser import (
 from vllm.entrypoints.openai.protocol import (
     FunctionCall,
     ResponseInputOutputItem,
+    ResponseRawMessageAndToken,
     ResponsesRequest,
 )
 from vllm.entrypoints.tool import Tool
@@ -239,12 +240,29 @@ class ParsableContext(ConversationContext):
         self.chat_template_content_format = chat_template_content_format
         self.tool_dicts = tool_dicts
 
+        self.input_messages = ResponseRawMessageAndToken(message="", tokens=[])
+        self.output_messages = ResponseRawMessageAndToken(message="", tokens=[])
+
     def append_output(self, output: RequestOutput) -> None:
         # TODO: output.prompt / output.prompt_token_id doesn't update correctly
         self.num_prompt_tokens = len(output.prompt_token_ids or [])
         self.num_cached_tokens = output.num_cached_tokens or 0
         self.num_output_tokens += len(output.outputs[0].token_ids or [])
         self.parser.process(output.outputs[0])
+        if len(self.input_messages.tokens) == 0:
+            if output.prompt:
+                self.input_messages.message += output.prompt
+            if output.prompt_token_ids:
+                self.input_messages.tokens.extend(output.prompt_token_ids)
+        else:
+            # TODO: merge them in properly together
+            # TODO: responsesParser doesn't parse kimi k2 sentences correctly
+            if output.prompt:
+                self.output_messages.message += output.prompt
+            if output.prompt_token_ids:
+                self.output_messages.tokens.extend(output.prompt_token_ids)
+        self.output_messages.tokens.extend(output.outputs[0].token_ids)
+        self.output_messages.message += output.outputs[0].text
 
     def append_tool_output(self, output: list[ResponseInputOutputItem]) -> None:
         self.parser.response_messages.extend(output)
